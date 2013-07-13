@@ -1,6 +1,7 @@
 /* This file is part of the KDE libraries
    Copyright (C) 2000 David Faure <faure@kde.org>
    Copyright (C) 2002 Holger Schroeder <holger-kde@holgis.net>
+   Copyright (C) 2013 Pier Luigi Fiorini <pierluigi.fiorini@gmail.com>
 
    This library is free software; you can redistribute it and/or
    modify it under the terms of the GNU Library General Public
@@ -17,7 +18,7 @@
    Boston, MA 02110-1301, USA.
 */
 
-#include "kzip.h"
+#include "zip.h"
 #include "kfilterdev.h"
 #include "klimitediodevice_p.h"
 
@@ -32,6 +33,27 @@
 #include <zlib.h>
 #include <time.h>
 #include <string.h>
+
+#include <karchivehandlerplugin.h>
+
+class ZipPlugin : public KArchiveHandlerPlugin
+{
+    Q_OBJECT
+    Q_PLUGIN_METADATA(IID "org.kde.KArchiveHandlerFactoryInterface" FILE "zip.json")
+public:
+    QStringList mimeTypes() const {
+        QStringList types;
+        types << QStringLiteral("application/zip");
+        return types;
+    }
+
+    KArchiveHandler *create(const QString &mimeType) {
+        if (mimeTypes().contains(mimeType))
+          return new ZipHandler(mimeType);
+        return 0;
+    }
+};
+
 
 const int max_path_len = 4095;	// maximum number of character a path may contain
 
@@ -282,27 +304,27 @@ static bool parseExtraField(const char *buffer, int size, bool islocal,
 }
 
 ////////////////////////////////////////////////////////////////////////
-/////////////////////////// KZip ///////////////////////////////////////
+/////////////////////////// ZipHandler ///////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////
 
-class KZip::KZipPrivate
+class ZipHandler::ZipHandlerPrivate
 {
 public:
-    KZipPrivate()
+    ZipHandlerPrivate()
         : m_crc( 0 ),
           m_currentFile( 0 ),
           m_currentDev( 0 ),
           m_compression( 8 ),
-          m_extraField( KZip::NoExtraField ),
+          m_extraField( ZipHandler::NoExtraField ),
 	  m_offset( 0 )
     {}
 
     unsigned long           m_crc;         // checksum
-    KZipFileEntry*          m_currentFile; // file currently being written
+    ZipHandlerFileEntry*          m_currentFile; // file currently being written
     QIODevice*              m_currentDev;  // filterdev used to write to the above file
-    QList<KZipFileEntry*> m_fileList;    // flat list of all files, for the index (saves a recursive method ;)
+    QList<ZipHandlerFileEntry*> m_fileList;    // flat list of all files, for the index (saves a recursive method ;)
     int                     m_compression;
-    KZip::ExtraField        m_extraField;
+    ZipHandler::ExtraField        m_extraField;
     // m_offset holds the offset of the place in the zip,
     // where new data can be appended. after openarchive it points to 0, when in
     // writeonly mode, or it points to the beginning of the central directory.
@@ -310,17 +332,12 @@ public:
     quint64                 m_offset;
 };
 
-KZip::KZip( const QString& fileName )
-    : KArchive( fileName ),d(new KZipPrivate)
+ZipHandler::ZipHandler( const QString& mimeType )
+    : KArchiveHandler( mimeType ),d(new ZipHandlerPrivate)
 {
 }
 
-KZip::KZip( QIODevice * dev )
-    : KArchive( dev ),d(new KZipPrivate)
-{
-}
-
-KZip::~KZip()
+ZipHandler::~ZipHandler()
 {
     //qDebug() << this;
     if( isOpen() )
@@ -328,7 +345,7 @@ KZip::~KZip()
     delete d;
 }
 
-bool KZip::openArchive( QIODevice::OpenMode mode )
+bool ZipHandler::openArchive( QIODevice::OpenMode mode )
 {
     //qDebug();
     d->m_fileList.clear();
@@ -688,7 +705,7 @@ bool KZip::openArchive( QIODevice::OpenMode mode )
                 }
                 else
                 {
-                    entry = new KArchiveDirectory( this, entryName, access, (int)pfi.mtime, rootDir()->user(), rootDir()->group(), QString() );
+                    entry = new KArchiveDirectory( archive(), entryName, access, (int)pfi.mtime, rootDir()->user(), rootDir()->group(), QString() );
                     //qDebug() << "KArchiveDirectory created, entryName= " << entryName << ", name=" << name;
                 }
 	    }
@@ -698,14 +715,14 @@ bool KZip::openArchive( QIODevice::OpenMode mode )
 		if (S_ISLNK(access)) {
 		    symlink = QFile::decodeName(pfi.guessed_symlink);
 		}
-                entry = new KZipFileEntry( this, entryName, access, pfi.mtime,
+                entry = new ZipHandlerFileEntry( archive(), entryName, access, pfi.mtime,
 					rootDir()->user(), rootDir()->group(),
 					symlink, name, dataoffset,
 					ucsize, cmethod, csize );
-                static_cast<KZipFileEntry *>(entry)->setHeaderStart( localheaderoffset );
-                static_cast<KZipFileEntry*>(entry)->setCRC32(crc32);
-                //qDebug() << "KZipFileEntry created, entryName= " << entryName << ", name=" << name;
-                d->m_fileList.append( static_cast<KZipFileEntry *>( entry ) );
+                static_cast<ZipHandlerFileEntry *>(entry)->setHeaderStart( localheaderoffset );
+                static_cast<ZipHandlerFileEntry*>(entry)->setCRC32(crc32);
+                //qDebug() << "ZipHandlerFileEntry created, entryName= " << entryName << ", name=" << name;
+                d->m_fileList.append( static_cast<ZipHandlerFileEntry *>( entry ) );
             }
 
             if ( entry )
@@ -786,7 +803,7 @@ bool KZip::openArchive( QIODevice::OpenMode mode )
     return true;
 }
 
-bool KZip::closeArchive()
+bool ZipHandler::closeArchive()
 {
     if ( ! ( mode() & QIODevice::WriteOnly ) )
     {
@@ -804,7 +821,7 @@ bool KZip::closeArchive()
     qint64 centraldiroffset = device()->pos();
     //qDebug() << "closearchive: centraldiroffset: " << centraldiroffset;
     qint64 atbackup = centraldiroffset;
-    QMutableListIterator<KZipFileEntry*> it( d->m_fileList );
+    QMutableListIterator<ZipHandlerFileEntry*> it( d->m_fileList );
 
     while(it.hasNext())
     {	//set crc and compressed size in each local file header
@@ -976,7 +993,7 @@ bool KZip::closeArchive()
     return true;
 }
 
-bool KZip::doWriteDir( const QString &name, const QString &user, const QString &group,
+bool ZipHandler::doWriteDir( const QString &name, const QString &user, const QString &group,
                        mode_t perm, time_t atime, time_t mtime, time_t ctime ) {
     // Zip files have no explicit directories, they are implicitly created during extraction time
     // when file entries have paths in them.
@@ -984,22 +1001,22 @@ bool KZip::doWriteDir( const QString &name, const QString &user, const QString &
     QString dirName = name;
     if (!name.endsWith(QLatin1Char('/')))
         dirName = dirName.append(QLatin1Char('/'));
-    return writeFile(dirName, user, group, 0, 0, perm, atime, mtime, ctime);
+    return archive()->writeFile(dirName, user, group, 0, 0, perm, atime, mtime, ctime);
 }
 
-bool KZip::doPrepareWriting(const QString &name, const QString &user,
+bool ZipHandler::doPrepareWriting(const QString &name, const QString &user,
                                const QString &group, qint64 /*size*/, mode_t perm,
                                time_t atime, time_t mtime, time_t ctime) {
     //qDebug();
     if ( !isOpen() )
     {
-        //qWarning( "KZip::writeFile: You must open the zip file before writing to it\n");
+        //qWarning( "ZipHandler::writeFile: You must open the zip file before writing to it\n");
         return false;
     }
 
     if ( ! ( mode() & QIODevice::WriteOnly ) ) // accept WriteOnly and ReadWrite
     {
-        //qWarning( "KZip::writeFile: You must open the zip file for writing\n");
+        //qWarning( "ZipHandler::writeFile: You must open the zip file for writing\n");
         return false;
     }
 
@@ -1015,7 +1032,7 @@ bool KZip::doPrepareWriting(const QString &name, const QString &user,
     // to save, so that we don't have duplicate file entries when viewing the zip
     // with konqi...
     // CAUTION: the old file itself is still in the zip and won't be removed !!!
-    QMutableListIterator<KZipFileEntry*> it( d->m_fileList );
+    QMutableListIterator<ZipHandlerFileEntry*> it( d->m_fileList );
 	//qDebug() << "fileName to write: " << name;
     while(it.hasNext())
     {
@@ -1040,8 +1057,8 @@ bool KZip::doPrepareWriting(const QString &name, const QString &user,
         parentDir = findOrCreate( dir );
     }
 
-    // construct a KZipFileEntry and add it to list
-    KZipFileEntry * e = new KZipFileEntry( this, fileName, perm, mtime, user, group, QString(),
+    // construct a ZipHandlerFileEntry and add it to list
+    ZipHandlerFileEntry * e = new ZipHandlerFileEntry( archive(), fileName, perm, mtime, user, group, QString(),
                                            name, device()->pos() + 30 + name.length(), // start
                                            0 /*size unknown yet*/, d->m_compression, 0 /*csize unknown yet*/ );
     e->setHeaderStart( device()->pos() );
@@ -1158,7 +1175,7 @@ bool KZip::doPrepareWriting(const QString &name, const QString &user,
     return b;
 }
 
-bool KZip::doFinishWriting( qint64 size )
+bool ZipHandler::doFinishWriting( qint64 size )
 {
     if ( d->m_currentFile->encoding() == 8 ) {
         // Finish
@@ -1195,7 +1212,7 @@ bool KZip::doFinishWriting( qint64 size )
     return true;
 }
 
-bool KZip::doWriteSymLink(const QString &name, const QString &target,
+bool ZipHandler::doWriteSymLink(const QString &name, const QString &target,
                           const QString &user, const QString &group,
                           mode_t perm, time_t atime, time_t mtime, time_t ctime) {
   // reassure that symlink flag is set, otherwise strange things happen on
@@ -1217,7 +1234,7 @@ bool KZip::doWriteSymLink(const QString &name, const QString &target,
     return false;
   }
 
-  if (!finishWriting(symlink_target.length())) {
+  if (!archive()->finishWriting(symlink_target.length())) {
     //qWarning() << "finishWriting failed";
     setCompression(c);
     return false;
@@ -1227,12 +1244,12 @@ bool KZip::doWriteSymLink(const QString &name, const QString &target,
   return true;
 }
 
-void KZip::virtual_hook( int id, void* data )
+void ZipHandler::virtual_hook( int id, void* data )
 {
-    KArchive::virtual_hook( id, data );
+    KArchiveHandler::virtual_hook( id, data );
 }
 
-bool KZip::writeData(const char * data, qint64 size)
+bool ZipHandler::writeData(const char * data, qint64 size)
 {
     Q_ASSERT( d->m_currentFile );
     Q_ASSERT( d->m_currentDev );
@@ -1249,33 +1266,33 @@ bool KZip::writeData(const char * data, qint64 size)
     return written == size;
 }
 
-void KZip::setCompression( Compression c )
+void ZipHandler::setCompression( Compression c )
 {
     d->m_compression = ( c == NoCompression ) ? 0 : 8;
 }
 
-KZip::Compression KZip::compression() const
+ZipHandler::Compression ZipHandler::compression() const
 {
    return ( d->m_compression == 8 ) ? DeflateCompression : NoCompression;
 }
 
-void KZip::setExtraField( ExtraField ef )
+void ZipHandler::setExtraField( ExtraField ef )
 {
     d->m_extraField = ef;
 }
 
-KZip::ExtraField KZip::extraField() const
+ZipHandler::ExtraField ZipHandler::extraField() const
 {
     return d->m_extraField;
 }
 
 ////////////////////////////////////////////////////////////////////////
-////////////////////// KZipFileEntry////////////////////////////////////
+////////////////////// ZipHandlerFileEntry////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////
-class KZipFileEntry::KZipFileEntryPrivate
+class ZipHandlerFileEntry::ZipHandlerFileEntryPrivate
 {
 public:
-    KZipFileEntryPrivate()
+    ZipHandlerFileEntryPrivate()
     : crc(0),
       compressedSize(0),
       headerStart(0),
@@ -1288,64 +1305,64 @@ public:
     QString       path;
 };
 
-KZipFileEntry::KZipFileEntry(KZip* zip, const QString& name, int access, int date,
+ZipHandlerFileEntry::ZipHandlerFileEntry(KArchive* zip, const QString& name, int access, int date,
                              const QString& user, const QString& group, const QString& symlink,
                              const QString& path, qint64 start, qint64 uncompressedSize,
                              int encoding, qint64 compressedSize)
  : KArchiveFile(zip, name, access, date, user, group, symlink, start, uncompressedSize ),
-   d(new KZipFileEntryPrivate)
+   d(new ZipHandlerFileEntryPrivate)
 {
     d->path = path;
     d->encoding = encoding;
     d->compressedSize = compressedSize;
 }
 
-KZipFileEntry::~KZipFileEntry()
+ZipHandlerFileEntry::~ZipHandlerFileEntry()
 {
     delete d;
 }
 
-int KZipFileEntry::encoding() const
+int ZipHandlerFileEntry::encoding() const
 {
     return d->encoding;
 }
 
-qint64 KZipFileEntry::compressedSize() const
+qint64 ZipHandlerFileEntry::compressedSize() const
 {
     return d->compressedSize;
 }
 
-void KZipFileEntry::setCompressedSize(qint64 compressedSize)
+void ZipHandlerFileEntry::setCompressedSize(qint64 compressedSize)
 {
     d->compressedSize = compressedSize;
 }
 
-void KZipFileEntry::setHeaderStart(qint64 headerstart)
+void ZipHandlerFileEntry::setHeaderStart(qint64 headerstart)
 {
     d->headerStart = headerstart;
 }
 
-qint64 KZipFileEntry::headerStart() const
+qint64 ZipHandlerFileEntry::headerStart() const
 {
     return d->headerStart;
 }
 
-unsigned long KZipFileEntry::crc32() const
+unsigned long ZipHandlerFileEntry::crc32() const
 {
     return d->crc;
 }
 
-void KZipFileEntry::setCRC32(unsigned long crc32)
+void ZipHandlerFileEntry::setCRC32(unsigned long crc32)
 {
     d->crc=crc32;
 }
 
-const QString &KZipFileEntry::path() const
+const QString &ZipHandlerFileEntry::path() const
 {
     return d->path;
 }
 
-QByteArray KZipFileEntry::data() const
+QByteArray ZipHandlerFileEntry::data() const
 {
     QIODevice* dev = createDevice();
     QByteArray arr;
@@ -1356,7 +1373,7 @@ QByteArray KZipFileEntry::data() const
     return arr;
 }
 
-QIODevice* KZipFileEntry::createDevice() const
+QIODevice* ZipHandlerFileEntry::createDevice() const
 {
     //qDebug() << "creating iodevice limited to pos=" << position() << ", csize=" << compressedSize();
     // Limit the reading to the appropriate part of the underlying device (e.g. file)
@@ -1380,7 +1397,9 @@ QIODevice* KZipFileEntry::createDevice() const
     }
 
     qCritical() << "This zip file contains files compressed with method"
-                << encoding() << ", this method is currently not supported by KZip,"
+                << encoding() << ", this method is currently not supported by ZipHandler,"
                 << "please use a command-line tool to handle this file.";
     return 0L;
 }
+
+#include "zip.moc"

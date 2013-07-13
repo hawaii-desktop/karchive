@@ -1,5 +1,6 @@
 /* This file is part of the KDE libraries
    Copyright (C) 2002 Holger Schroeder <holger-kde@holgis.net>
+   Copyright (C) 2013 Pier Luigi Fiorini <pierluigi.fiorini@gmail.com>
 
    This library is free software; you can redistribute it and/or
    modify it under the terms of the GNU Library General Public
@@ -15,12 +16,13 @@
    the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
    Boston, MA 02110-1301, USA.
 */
-#ifndef KZIP_H
-#define KZIP_H
+#ifndef ZIP_H
+#define ZIP_H
 
 #include <karchive.h>
+#include <karchivehandler.h>
 
-class KZipFileEntry;
+class ZipHandlerFileEntry;
 /**
  *   A class for reading / writing zip archives.
  *
@@ -42,7 +44,7 @@ class KZipFileEntry;
  *   http://www.pkware.com/products/enterprise/white_papers/appnote.html
  * @author Holger Schroeder <holger-kde@holgis.net>
  */
-class KARCHIVE_EXPORT KZip : public KArchive
+class KARCHIVE_EXPORT ZipHandler : public KArchiveHandler
 {
 public:
     /**
@@ -51,22 +53,13 @@ public:
      *
      * @param filename is a local path (e.g. "/home/holger/myfile.zip")
      */
-    KZip( const QString& filename );
-
-    /**
-     * Creates an instance that operates on the given device.
-     * The device can be compressed (KFilterDev) or not (QFile, etc.).
-     * @warning Do not assume that giving a QFile here will decompress the file,
-     * in case it's compressed!
-     * @param dev the device to access
-     */
-    KZip( QIODevice * dev );
+    ZipHandler( const QString& mimeType );
 
     /**
      * If the zip file is still opened, then it will be
      * closed automatically by the destructor.
      */
-    virtual ~KZip();
+    virtual ~ZipHandler();
 
     /**
      * Describes the contents of the "extra field" for a given file in the Zip archive.
@@ -159,21 +152,21 @@ protected:
     virtual void virtual_hook( int id, void* data );
 
 private:
-    class KZipPrivate;
-    KZipPrivate * const d;
+    class ZipHandlerPrivate;
+    ZipHandlerPrivate * const d;
 };
 
 
 /**
- * A KZipFileEntry represents an file in a zip archive.
+ * A ZipHandlerFileEntry represents an file in a zip archive.
  */
-class KARCHIVE_EXPORT KZipFileEntry : public KArchiveFile
+class KARCHIVE_EXPORT ZipHandlerFileEntry : public KArchiveFile
 {
 public:
     /**
-     * Creates a new zip file entry. Do not call this, KZip takes care of it.
+     * Creates a new zip file entry. Do not call this, ZipHandler takes care of it.
      */
-    KZipFileEntry( KZip* zip, const QString& name, int access, int date,
+    ZipHandlerFileEntry( KArchive* zip, const QString& name, int access, int date,
                    const QString& user, const QString& group, const QString& symlink,
                    const QString& path, qint64 start, qint64 uncompressedSize,
                    int encoding, qint64 compressedSize);
@@ -181,7 +174,7 @@ public:
     /**
      * Destructor. Do not call this.
      */
-    ~KZipFileEntry();
+    ~ZipHandlerFileEntry();
 
     int encoding() const;
     qint64 compressedSize() const;
@@ -216,8 +209,8 @@ public:
     virtual QIODevice* createDevice() const;
 
 private:
-    class KZipFileEntryPrivate;
-    KZipFileEntryPrivate * const d;
+    class ZipHandlerFileEntryPrivate;
+    ZipHandlerFileEntryPrivate * const d;
 };
 
 #endif
