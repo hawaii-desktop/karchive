@@ -16,7 +16,7 @@ endif()
 
 if(LIBLZMA_FOUND)
    include_directories(${LIBLZMA_INCLUDE_DIRS})
-   set(karchive_OPTIONAL_SRCS ${karchive_OPTIONAL_SRCS} kxzfilter.cpp k7zip.cpp )
+   set(karchive_OPTIONAL_SRCS ${karchive_OPTIONAL_SRCS} kxzfilter.cpp )
    set(karchive_OPTIONAL_LIBS ${karchive_OPTIONAL_LIBS} ${LIBLZMA_LIBRARIES})
 endif()
 
@@ -25,15 +25,12 @@ set(karchive_SRCS
    karchive.cpp
    karchivehandler.cpp
    karchivehandlerplugin.cpp
-   kar.cpp
    kcompressiondevice.cpp
    kfilterbase.cpp
    kfilterdev.cpp
    kgzipfilter.cpp
    klimitediodevice.cpp
    knonefilter.cpp
-   ktar.cpp
-   kzip.cpp
 )
 
 add_library(KArchive ${karchive_SRCS} ${karchive_OPTIONAL_SRCS})
@@ -52,20 +49,12 @@ install( FILES
   karchive.h
   karchivehandler.h
   karchivehandlerplugin.h
-  kar.h
   kcompressiondevice.h
   kfilterbase.h
   kfilterdev.h
-  ktar.h
-  kzip.h
 
   ${CMAKE_CURRENT_BINARY_DIR}/karchive_export.h
   DESTINATION ${INCLUDE_INSTALL_DIR} COMPONENT Devel
 )
 
-
-if(LIBLZMA_FOUND)
-   install( FILES k7zip.h
-            DESTINATION ${INCLUDE_INSTALL_DIR} COMPONENT Devel
-   )
-endif()
+add_subdirectory(archivehandlers)

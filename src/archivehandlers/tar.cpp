@@ -1,6 +1,7 @@
 /* This file is part of the KDE libraries
    Copyright (C) 2000 David Faure <faure@kde.org>
    Copyright (C) 2003 Leo Savernik <l.savernik@aon.at>
+   Copyright (C) 2013 Pier Luigi Fiorini <pierluigi.fiorini@gmail.com>
 
    This library is free software; you can redistribute it and/or
    modify it under the terms of the GNU Library General Public
@@ -17,7 +18,7 @@
    Boston, MA 02110-1301, USA.
 */
 
-#include "ktar.h"
+#include "tar.h"
 
 #include <stdlib.h> // strtol
 #include <time.h> // time()
@@ -31,9 +32,33 @@
 
 #include <kfilterdev.h>
 #include <kfilterbase.h>
+#include <karchive.h>
+#include <karchivehandlerplugin.h>
+
+class TarPlugin : public KArchiveHandlerPlugin
+{
+    Q_OBJECT
+    Q_PLUGIN_METADATA(IID "org.kde.KArchiveHandlerFactoryInterface" FILE "tar.json")
+public:
+    QStringList mimeTypes() const {
+        QStringList types;
+        types << QStringLiteral("application/x-tar")
+              << QStringLiteral("application/x-compressed-tar")
+              << QStringLiteral("application/x-bzip-compressed-tar")
+              << QStringLiteral("application/x-lzma-compressed-tar")
+              << QStringLiteral("application/x-xz-compressed-tar");
+        return types;
+    }
+
+    KArchiveHandler *create(const QString &mimeType) {
+        if (mimeTypes().contains(mimeType))
+          return new TarHandler(mimeType);
+        return 0;
+    }
+};
 
 ////////////////////////////////////////////////////////////////////////
-/////////////////////////// KTar ///////////////////////////////////
+/////////////////////////// TarHandler ///////////////////////////////////
 ////////////////////////////////////////////////////////////////////////
 
 // Mime types of known filters
@@ -43,17 +68,17 @@ static const char application_lzma[] = "application/x-lzma";
 static const char application_xz[] = "application/x-xz";
 static const char application_zip[] = "application/zip";
 
-class KTar::KTarPrivate
+class TarHandler::TarHandlerPrivate
 {
 public:
-    KTarPrivate(KTar *parent)
+    TarHandlerPrivate(TarHandler *parent)
       : q(parent),
         tarEnd( 0 ),
         tmpFile( 0 )
     {
     }
 
-    KTar *q;
+    TarHandler *q;
     QStringList dirList;
     qint64 tarEnd;
     QTemporaryFile* tmpFile;
@@ -71,20 +96,14 @@ public:
     qint64 readHeader(char *buffer, QString &name, QString &symlink);
 };
 
-KTar::KTar( const QString& fileName, const QString & _mimetype )
-    : KArchive( fileName ), d(new KTarPrivate(this))
+TarHandler::TarHandler( const QString &mimeType )
+    : KArchiveHandler( mimeType ), d(new TarHandlerPrivate(this))
 {
-    d->mimetype = _mimetype;
-}
-
-KTar::KTar( QIODevice * dev )
-    : KArchive( dev ), d(new KTarPrivate(this))
-{
-    Q_ASSERT( dev );
+    d->mimetype = mimeType;
 }
 
 // Only called when a filename was given
-bool KTar::createDevice(QIODevice::OpenMode mode)
+bool TarHandler::createDevice(QIODevice::OpenMode mode)
 {
     if (d->mimetype.isEmpty()) {
         // Find out mimetype manually
@@ -124,9 +143,9 @@ bool KTar::createDevice(QIODevice::OpenMode mode)
     }
 
     if (d->mimetype == QLatin1String("application/x-tar")) {
-        return KArchive::createDevice(mode);
+        return KArchiveHandler::createDevice(mode);
     } else if (mode == QIODevice::WriteOnly) {
-        if (!KArchive::createDevice(mode))
+        if (!KArchiveHandler::createDevice(mode))
             return false;
         if (!d->mimetype.isEmpty()) {
             // Create a compression filter on top of the QSaveFile device that KArchive created.
@@ -158,7 +177,7 @@ bool KTar::createDevice(QIODevice::OpenMode mode)
     }
 }
 
-KTar::~KTar()
+TarHandler::~TarHandler()
 {
     // mjarrett: Closes to prevent ~KArchive from aborting w/o device
     if( isOpen() )
@@ -168,16 +187,16 @@ KTar::~KTar()
     delete d;
 }
 
-void KTar::setOrigFileName( const QByteArray & fileName ) {
+void TarHandler::setOrigFileName( const QByteArray & fileName ) {
     if ( !isOpen() || !(mode() & QIODevice::WriteOnly) )
     {
-        //qWarning() << "KTar::setOrigFileName: File must be opened for writing first.\n";
+        //qWarning() << "TarHandler::setOrigFileName: File must be opened for writing first.\n";
         return;
     }
     d->origFileName = fileName;
 }
 
-qint64 KTar::KTarPrivate::readRawHeader( char *buffer ) {
+qint64 TarHandler::TarHandlerPrivate::readRawHeader( char *buffer ) {
   // Read header
   qint64 n = q->device()->read( buffer, 0x200 );
   // we need to test if there is a prefix value because the file name can be null
@@ -204,7 +223,7 @@ qint64 KTar::KTarPrivate::readRawHeader( char *buffer ) {
       if( strncmp( buffer + 148 + 6 - s.length(), s.data(), s.length() )
         && strncmp( buffer + 148 + 7 - s.length(), s.data(), s.length() )
         && strncmp( buffer + 148 + 8 - s.length(), s.data(), s.length() ) ) {
-        /*qWarning() << "KTar: invalid TAR file. Header is:" << QByteArray( buffer+257, 5 )
+        /*qWarning() << "TarHandler: invalid TAR file. Header is:" << QByteArray( buffer+257, 5 )
                        << "instead of ustar. Reading from wrong pos in file?"
                        << "checksum=" << QByteArray( buffer + 148 + 6 - s.length(), s.length() );*/
         return -1;
@@ -217,7 +236,7 @@ qint64 KTar::KTarPrivate::readRawHeader( char *buffer ) {
   return n;
 }
 
-bool KTar::KTarPrivate::readLonglink(char *buffer,QByteArray &longlink) {
+bool TarHandler::TarHandlerPrivate::readLonglink(char *buffer,QByteArray &longlink) {
   qint64 n = 0;
   //qDebug() << "reading longlink from pos " << q->device()->pos();
   QIODevice *dev = q->device();
@@ -244,7 +263,7 @@ bool KTar::KTarPrivate::readLonglink(char *buffer,QByteArray &longlink) {
   return true;
 }
 
-qint64 KTar::KTarPrivate::readHeader( char *buffer, QString &name, QString &symlink ) {
+qint64 TarHandler::TarHandlerPrivate::readHeader( char *buffer, QString &name, QString &symlink ) {
   name.truncate(0);
   symlink.truncate(0);
   while (true) {
@@ -281,7 +300,7 @@ qint64 KTar::KTarPrivate::readHeader( char *buffer, QString &name, QString &syml
  * to decompress the original file now and write
  * the contents to the temporary file.
  */
-bool KTar::KTarPrivate::fillTempFile( const QString & fileName) {
+bool TarHandler::TarHandlerPrivate::fillTempFile( const QString & fileName) {
     if ( ! tmpFile )
         return true;
 
@@ -321,7 +340,7 @@ bool KTar::KTarPrivate::fillTempFile( const QString & fileName) {
     return true;
 }
 
-bool KTar::openArchive( QIODevice::OpenMode mode ) {
+bool TarHandler::openArchive( QIODevice::OpenMode mode ) {
 
     if ( !(mode & QIODevice::ReadOnly) )
         return true;
@@ -417,7 +436,7 @@ bool KTar::openArchive( QIODevice::OpenMode mode ) {
             if ( isdir )
             {
                 //qDebug() << "directory" << nm;
-                e = new KArchiveDirectory( this, nm, access, time, user, group, symlink );
+                e = new KArchiveDirectory( archive(), nm, access, time, user, group, symlink );
             }
             else
             {
@@ -430,7 +449,7 @@ bool KTar::openArchive( QIODevice::OpenMode mode ) {
                 if ( isDumpDir )
                 {
                     //qDebug() << nm << "isDumpDir";
-                    e = new KArchiveDirectory( this, nm, access, time, user, group, symlink );
+                    e = new KArchiveDirectory( archive(), nm, access, time, user, group, symlink );
                 }
                 else
                 {
@@ -443,7 +462,7 @@ bool KTar::openArchive( QIODevice::OpenMode mode ) {
                     }
 
                     //qDebug() << "file" << nm << "size=" << size;
-                    e = new KArchiveFile( this, nm, access, time, user, group, symlink,
+                    e = new KArchiveFile( archive(), nm, access, time, user, group, symlink,
                                           dev->pos(), size );
                 }
 
@@ -491,7 +510,7 @@ bool KTar::openArchive( QIODevice::OpenMode mode ) {
  * to the original file.
  * Must only be called if in write mode, not in read mode
  */
-bool KTar::KTarPrivate::writeBackTempFile( const QString & fileName )
+bool TarHandler::TarHandlerPrivate::writeBackTempFile( const QString & fileName )
 {
     if ( !tmpFile )
         return true;
@@ -531,7 +550,7 @@ bool KTar::KTarPrivate::writeBackTempFile( const QString & fileName )
     return true;
 }
 
-bool KTar::closeArchive() {
+bool TarHandler::closeArchive() {
     d->dirList.clear();
 
     bool ok = true;
@@ -549,7 +568,7 @@ bool KTar::closeArchive() {
     return ok;
 }
 
-bool KTar::doFinishWriting( qint64 size ) {
+bool TarHandler::doFinishWriting( qint64 size ) {
     // Write alignment
     int rest = size % 0x200;
     if ( ( mode() & QIODevice::ReadWrite ) == QIODevice::ReadWrite )
@@ -588,7 +607,7 @@ struct posix_header
 };
 */
 
-void KTar::KTarPrivate::fillBuffer( char * buffer,
+void TarHandler::TarHandlerPrivate::fillBuffer( char * buffer,
                                     const char * mode, qint64 size, time_t mtime, char typeflag,
                                     const char * uname, const char * gname ) {
   // mode (as in stpos())
@@ -651,7 +670,7 @@ void KTar::KTarPrivate::fillBuffer( char * buffer,
   memcpy( buffer + 0x94, s.constData(), 6 );
 }
 
-void KTar::KTarPrivate::writeLonglink(char *buffer, const QByteArray &name, char typeflag,
+void TarHandler::TarHandlerPrivate::writeLonglink(char *buffer, const QByteArray &name, char typeflag,
                                       const char *uname, const char *gname) {
   strcpy( buffer, "././@LongLink" );
   qint64 namelen = name.length() + 1;
@@ -669,7 +688,7 @@ void KTar::KTarPrivate::writeLonglink(char *buffer, const QByteArray &name, char
   }/*wend*/
 }
 
-bool KTar::doPrepareWriting(const QString &name, const QString &user,
+bool TarHandler::doPrepareWriting(const QString &name, const QString &user,
                           const QString &group, qint64 size, mode_t perm,
                           time_t /*atime*/, time_t mtime, time_t /*ctime*/) {
     if ( !isOpen() )
@@ -691,7 +710,7 @@ bool KTar::doPrepareWriting(const QString &name, const QString &user,
       // Create toplevel dirs
       // Commented out by David since it's not necessary, and if anybody thinks it is,
       // he needs to implement a findOrCreate equivalent in writeDir.
-      // But as KTar and the "tar" program both handle tar files without
+      // But as TarHandler and the "tar" program both handle tar files without
       // dir entries, there's really no need for that
       QString tmp ( fileName );
       int i = tmp.lastIndexOf( '/' );
@@ -734,7 +753,7 @@ bool KTar::doPrepareWriting(const QString &name, const QString &user,
     return device()->write( buffer, 0x200 ) == 0x200;
 }
 
-bool KTar::doWriteDir(const QString &name, const QString &user,
+bool TarHandler::doWriteDir(const QString &name, const QString &user,
                       const QString &group, mode_t perm,
                       time_t /*atime*/, time_t mtime, time_t /*ctime*/) {
     if ( !isOpen() )
@@ -792,7 +811,7 @@ bool KTar::doWriteDir(const QString &name, const QString &user,
     return true; // TODO if wanted, better error control
 }
 
-bool KTar::doWriteSymLink(const QString &name, const QString &target,
+bool TarHandler::doWriteSymLink(const QString &name, const QString &target,
                         const QString &user, const QString &group,
                         mode_t perm, time_t /*atime*/, time_t mtime, time_t /*ctime*/) {
     if ( !isOpen() )
@@ -847,6 +866,8 @@ bool KTar::doWriteSymLink(const QString &name, const QString &target,
     return retval;
 }
 
-void KTar::virtual_hook( int id, void* data ) {
-    KArchive::virtual_hook( id, data );
+void TarHandler::virtual_hook( int id, void* data ) {
+    KArchiveHandler::virtual_hook( id, data );
 }
+
+#include "tar.moc"
