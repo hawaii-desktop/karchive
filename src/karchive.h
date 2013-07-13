@@ -1,6 +1,7 @@
 /* This file is part of the KDE libraries
    Copyright (C) 2000-2005 David Faure <faure@kde.org>
    Copyright (C) 2003 Leo Savernik <l.savernik@aon.at>
+   Copyright (C) 2013 Pier Luigi Fiorini <pierluigi.fiorini@gmail.com>
 
    Moved from ktar.h by Roberto Teixeira <maragato@kde.org>
 
@@ -33,6 +34,7 @@
 
 class KArchiveDirectory;
 class KArchiveFile;
+class KArchiveHandler;
 
 class KArchivePrivate;
 /**
@@ -42,21 +44,25 @@ class KArchivePrivate;
  */
 class KARCHIVE_EXPORT KArchive
 {
-protected:
+public:
     /**
-     * Base constructor (protected since this is a pure virtual class).
+     * Base constructor.
      * @param fileName is a local path (e.g. "/tmp/myfile.ext"),
      * from which the archive will be read from, or into which the archive
      * will be written, depending on the mode given to open().
+     * The MIME Type will be recognized and the appropriate plugin will
+     * automatically be loaded.
      */
     KArchive( const QString& fileName );
 
     /**
-     * Base constructor (protected since this is a pure virtual class).
+     * Base constructor.
      * @param dev the I/O device where the archive reads its data
      * Note that this can be a file, but also a data buffer, a compression filter, etc.
      * For a file in writing mode it is better to use the other constructor
      * though, to benefit from the use of QSaveFile when saving.
+     * The MIME Type will be recognized and the appropriate plugin will
+     * automatically be loaded.
      */
     KArchive( QIODevice * dev );
 
@@ -325,22 +331,6 @@ protected:
     virtual bool doFinishWriting( qint64 size ) = 0;
 
     /**
-     * Ensures that @p path exists, create otherwise.
-     * This handles e.g. tar files missing directory entries, like mico-2.3.0.tar.gz :)
-     * @param path the path of the directory
-     * @return the directory with the given @p path
-     */
-    KArchiveDirectory * findOrCreate( const QString & path );
-
-    /**
-     * Can be reimplemented in order to change the creation of the device
-     * (when using the fileName constructor). By default this method uses
-     * QSaveFile when saving, and a simple QFile on reading.
-     * This method is called by open().
-     */
-    virtual bool createDevice( QIODevice::OpenMode mode );
-
-    /**
      * Can be called by derived classes in order to set the underlying device.
      * Note that KArchive will -not- own the device, it must be deleted by the derived class.
      */
@@ -356,6 +346,8 @@ protected:
     virtual void virtual_hook( int id, void* data );
 private:
     KArchivePrivate* const d;
+
+    KArchiveHandler *loadPlugin( const QString &mimeType );
 };
 
 class KArchiveEntryPrivate;

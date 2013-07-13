@@ -20,6 +20,8 @@
 */
 
 #include "karchive.h"
+#include "karchivehandler.h"
+#include "karchivehandlerplugin.h"
 #include "klimitediodevice_p.h"
 
 #include <qplatformdefs.h> // QT_STATBUF, QT_LSTAT
@@ -27,10 +29,14 @@
 #include <qsavefile.h>
 
 #include <QStack>
+#include <QtCore/QCoreApplication>
 #include <QtCore/QMap>
 #include <QtCore/QDebug>
 #include <QtCore/QDir>
 #include <QtCore/QFile>
+#include <QtCore/QMimeDatabase>
+#include <QtCore/QMimeType>
+#include <QtCore/QPluginLoader>
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -50,28 +56,15 @@ class KArchivePrivate
 {
 public:
     KArchivePrivate()
-        : rootDir( 0 ),
-          saveFile( 0 ),
-          dev ( 0 ),
-          fileName(),
-          mode( QIODevice::NotOpen ),
-          deviceOwned( false )
+        : handler( 0 )
     {}
     ~KArchivePrivate()
     {
-        delete saveFile;
-        delete rootDir;
+        delete handler;
     }
-    void abortWriting();
 
-    KArchiveDirectory* rootDir;
-    QSaveFile* saveFile;
-    QIODevice * dev;
-    QString fileName;
-    QIODevice::OpenMode mode;
-    bool deviceOwned; // if true, we (KArchive) own dev and must delete it
+    KArchiveHandler *handler;
 };
-
 
 ////////////////////////////////////////////////////////////////////////
 /////////////////////////// KArchive ///////////////////////////////////
@@ -81,21 +74,66 @@ KArchive::KArchive( const QString& fileName )
 	: d(new KArchivePrivate)
 {
     Q_ASSERT( !fileName.isEmpty() );
-    d->fileName = fileName;
-    // This constructor leaves the device set to 0.
-    // This is for the use of QSaveFile, see open().
+
+    // Detect the MIME Type
+    QMimeDatabase db;
+    QMimeType mime;
+    if (QFile::exists(fileName)) {
+        QFile file(fileName);
+        if (file.open(QIODevice::ReadOnly)) {
+            mime= db.mimeTypeForData(&file);
+            file.close();
+        }
+    }
+
+    // Unable to determine MIME Type from contents so get it from file name
+    if (!mime.isValid())
+        mime = db.mimeTypeForFile(fileName, QMimeDatabase::MatchExtension);
+
+    // If we still can't determine it, raise a fatal error
+    if (!mime.isValid())
+        qFatal("Could not determine the MIME Type for %s, cannot continue!",
+               qPrintable(fileName));
+
+    // Find the appropriate plugin
+    KArchiveHandler *handler = loadPlugin(mime.name());
+
+    // We cannot continue if no archive handler have been found
+    if (!handler)
+        qFatal("No archive handler have been found for %s, cannot continue!",
+               qPrintable(mime.name()));
+
+    d->handler = handler;
+    d->handler->setArchive(this);
+    d->handler->setFileName(fileName);
 }
 
 KArchive::KArchive( QIODevice * dev )
 	: d(new KArchivePrivate)
 {
-    d->dev = dev;
+    // Detect the MIME Type
+    QMimeDatabase db;
+    QMimeType mime = db.mimeTypeForData(dev);
+    if (!mime.isValid())
+        qFatal("Could not determine the MIME Type for device, cannot continue!");
+
+    // Find the appropriate plugin
+    KArchiveHandler *handler = loadPlugin(mime.name());
+
+    // We cannot continue if no archive handler have been found
+    if (!handler)
+        qFatal("No archive handler have been found for %s, cannot continue!",
+               qPrintable(mime.name()));
+
+    d->handler = handler;
+    d->handler->setArchive(this);
+    d->handler->setDevice(dev);
 }
 
 KArchive::~KArchive()
 {
     if ( isOpen() )
-        close(); // WARNING: won't call the virtual method close in the derived class!!!
+        close();
 
     delete d;
 }
@@ -103,104 +141,18 @@ KArchive::~KArchive()
 bool KArchive::open( QIODevice::OpenMode mode )
 {
     Q_ASSERT( mode != QIODevice::NotOpen );
-
-    if ( isOpen() )
-        close();
-
-    if ( !d->fileName.isEmpty() )
-    {
-        Q_ASSERT( !d->dev );
-        if ( !createDevice( mode ) )
-            return false;
-    }
-
-    Q_ASSERT( d->dev );
-
-    if ( !d->dev->isOpen() && !d->dev->open( mode ) )
-        return false;
-
-    d->mode = mode;
-
-    Q_ASSERT( !d->rootDir );
-    d->rootDir = 0;
-
-    return openArchive( mode );
-}
-
-bool KArchive::createDevice( QIODevice::OpenMode mode )
-{
-    switch( mode ) {
-    case QIODevice::WriteOnly:
-        if ( !d->fileName.isEmpty() ) {
-            // The use of QSaveFile can't be done in the ctor (no mode known yet)
-            //qDebug() << "Writing to a file using QSaveFile";
-            d->saveFile = new QSaveFile(d->fileName);
-            if ( !d->saveFile->open(QIODevice::WriteOnly) ) {
-                //qWarning() << "QSaveFile creation for " << d->fileName << " failed, " << d->saveFile->errorString();
-                delete d->saveFile;
-                d->saveFile = 0;
-                return false;
-            }
-            d->dev = d->saveFile;
-            Q_ASSERT( d->dev );
-        }
-        break;
-    case QIODevice::ReadOnly:
-    case QIODevice::ReadWrite:
-        // ReadWrite mode still uses QFile for now; we'd need to copy to the tempfile, in fact.
-        if ( !d->fileName.isEmpty() ) {
-            d->dev = new QFile( d->fileName );
-            d->deviceOwned = true;
-        }
-        break; // continued below
-    default:
-        //qWarning() << "Unsupported mode " << d->mode;
-        return false;
-    }
-    return true;
+    return d->handler->open( mode );
 }
 
 bool KArchive::close()
 {
-    if ( !isOpen() )
-        return false; // already closed (return false or true? arguable...)
-
-    // moved by holger to allow kzip to write the zip central dir
-    // to the file in closeArchive()
-    // DF: added d->dev so that we skip closeArchive if saving aborted.
-    bool closeSucceeded = true;
-    if ( d->dev ) {
-        closeSucceeded = closeArchive();
-        if ( d->mode == QIODevice::WriteOnly && !closeSucceeded )
-            d->abortWriting();
-    }
-
-    if (d->dev && d->dev != d->saveFile) {
-        d->dev->close();
-    }
-
-    // if d->saveFile is not null then it is equal to d->dev.
-    if (d->saveFile) {
-        closeSucceeded = d->saveFile->commit();
-        delete d->saveFile;
-        d->saveFile = 0;
-    } if (d->deviceOwned) {
-        delete d->dev; // we created it ourselves in open()
-    }
-
-    delete d->rootDir;
-    d->rootDir = 0;
-    d->mode = QIODevice::NotOpen;
-    d->dev = 0;
-    return closeSucceeded;
+    return d->handler->close();
 }
 
 const KArchiveDirectory* KArchive::directory() const
 {
-    // rootDir isn't const so that parsing-on-demand is possible
-    return const_cast<KArchive *>(this)->rootDir();
+    return d->handler->rootDir();
 }
-
 
 bool KArchive::addLocalFile( const QString& fileName, const QString& destName )
 {
@@ -346,7 +298,7 @@ bool KArchive::writeData( const char* data, qint64 size )
 {
     bool ok = device()->write( data, size ) == size;
     if ( !ok )
-        d->abortWriting();
+        d->handler->abortWriting();
     return ok;
 }
 
@@ -360,7 +312,7 @@ bool KArchive::writeDir( const QString& name, const QString& user, const QString
                          mode_t perm, time_t atime,
                          time_t mtime, time_t ctime )
 {
-    return doWriteDir( name, user, group, perm | 040000, atime, mtime, ctime );
+    return d->handler->doWriteDir( name, user, group, perm | 040000, atime, mtime, ctime );
 }
 
 bool KArchive::writeSymLink(const QString &name, const QString &target,
@@ -368,7 +320,7 @@ bool KArchive::writeSymLink(const QString &name, const QString &target,
                             mode_t perm, time_t atime,
                             time_t mtime, time_t ctime )
 {
-    return doWriteSymLink( name, target, user, group, perm, atime, mtime, ctime );
+    return d->handler->doWriteSymLink( name, target, user, group, perm, atime, mtime, ctime );
 }
 
 
@@ -377,125 +329,76 @@ bool KArchive::prepareWriting( const QString& name, const QString& user,
                                mode_t perm, time_t atime,
                                time_t mtime, time_t ctime )
 {
-    bool ok = doPrepareWriting( name, user, group, size, perm, atime, mtime, ctime );
+    bool ok = d->handler->doPrepareWriting( name, user, group, size, perm, atime, mtime, ctime );
     if ( !ok )
-        d->abortWriting();
+        d->handler->abortWriting();
     return ok;
 }
 
 bool KArchive::finishWriting( qint64 size )
 {
-    return doFinishWriting( size );
+    return d->handler->doFinishWriting( size );
 }
 
 KArchiveDirectory * KArchive::rootDir()
 {
-    if ( !d->rootDir )
-    {
-        //qDebug() << "Making root dir ";
-        struct passwd* pw =  getpwuid( getuid() );
-        struct group* grp = getgrgid( getgid() );
-        QString username = pw ? QFile::decodeName(pw->pw_name) : QString::number( getuid() );
-        QString groupname = grp ? QFile::decodeName(grp->gr_name) : QString::number( getgid() );
-
-        d->rootDir = new KArchiveDirectory( this, QLatin1String("/"), (int)(0777 + S_IFDIR), 0, username, groupname, QString() );
-    }
-    return d->rootDir;
-}
-
-KArchiveDirectory * KArchive::findOrCreate( const QString & path )
-{
-    //qDebug() << path;
-    if ( path.isEmpty() || path == QLatin1String("/") || path == QLatin1String(".") ) // root dir => found
-    {
-        //qDebug() << "returning rootdir";
-        return rootDir();
-    }
-    // Important note : for tar files containing absolute paths
-    // (i.e. beginning with "/"), this means the leading "/" will
-    // be removed (no KDirectory for it), which is exactly the way
-    // the "tar" program works (though it displays a warning about it)
-    // See also KArchiveDirectory::entry().
-
-    // Already created ? => found
-    const KArchiveEntry* ent = rootDir()->entry( path );
-    if ( ent )
-    {
-        if ( ent->isDirectory() )
-            //qDebug() << "found it";
-            return (KArchiveDirectory *) ent;
-        else {
-            //qWarning() << "Found" << path << "but it's not a directory";
-        }
-    }
-
-    // Otherwise go up and try again
-    int pos = path.lastIndexOf( QLatin1Char('/') );
-    KArchiveDirectory * parent;
-    QString dirname;
-    if ( pos == -1 ) // no more slash => create in root dir
-    {
-        parent =  rootDir();
-        dirname = path;
-    }
-    else
-    {
-        QString left = path.left( pos );
-        dirname = path.mid( pos + 1 );
-        parent = findOrCreate( left ); // recursive call... until we find an existing dir.
-    }
-
-    //qDebug() << "found parent " << parent->name() << " adding " << dirname << " to ensure " << path;
-    // Found -> add the missing piece
-    KArchiveDirectory * e = new KArchiveDirectory( this, dirname, d->rootDir->permissions(),
-                                                   d->rootDir->date(), d->rootDir->user(),
-                                                   d->rootDir->group(), QString() );
-    parent->addEntry( e );
-    return e; // now a directory to <path> exists
+    return d->handler->rootDir();
 }
 
 void KArchive::setDevice( QIODevice * dev )
 {
-    if ( d->deviceOwned )
-        delete d->dev;
-    d->dev = dev;
-    d->deviceOwned = false;
+    d->handler->setDevice( dev );
 }
 
 void KArchive::setRootDir( KArchiveDirectory *rootDir )
 {
-    Q_ASSERT( !d->rootDir ); // Call setRootDir only once during parsing please ;)
-    d->rootDir = rootDir;
+    d->handler->setRootDir( rootDir );
 }
 
 QIODevice::OpenMode KArchive::mode() const
 {
-    return d->mode;
+    return d->handler->mode();
 }
 
 QIODevice * KArchive::device() const
 {
-    return d->dev;
+    return d->handler->device();
 }
 
 bool KArchive::isOpen() const
 {
-    return d->mode != QIODevice::NotOpen;
+    return d->handler->isOpen();
 }
 
 QString KArchive::fileName() const
 {
-    return d->fileName;
+    return d->handler->fileName();
 }
 
-void KArchivePrivate::abortWriting()
+KArchiveHandler *KArchive::loadPlugin( const QString &mimeType )
 {
-    if ( saveFile ) {
-        saveFile->cancelWriting();
-        delete saveFile;
-        saveFile = 0;
-        dev = 0;
+    KArchiveHandler *handler = 0;
+
+    const QStringList libPaths = QCoreApplication::libraryPaths();
+    const QString pathSuffix = QLatin1String("/karchivehandlers/");
+    foreach (const QString &libPath, libPaths) {
+        QDir dir(libPath + pathSuffix);
+        if (!dir.exists())
+            continue;
+
+        foreach (const QString &fileName, dir.entryList(QDir::Files)) {
+            QPluginLoader loader(fileName);
+            KArchiveHandlerPlugin *plugin =
+                qobject_cast<KArchiveHandlerPlugin *>(loader.instance());
+            if (plugin) {
+                handler = plugin->create(mimeType);
+                if (handler)
+                    break;
+            }
+        }
     }
+
+    return handler;
 }
 
 ////////////////////////////////////////////////////////////////////////

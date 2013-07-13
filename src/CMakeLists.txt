@@ -23,6 +23,8 @@ endif()
 
 set(karchive_SRCS
    karchive.cpp
+   karchivehandler.cpp
+   karchivehandlerplugin.cpp
    kar.cpp
    kcompressiondevice.cpp
    kfilterbase.cpp
@@ -48,6 +50,8 @@ install(TARGETS KArchive EXPORT KArchiveTargets ${INSTALL_TARGETS_DEFAULT_ARGS})
 
 install( FILES
   karchive.h
+  karchivehandler.h
+  karchivehandlerplugin.h
   kar.h
   kcompressiondevice.h
   kfilterbase.h
