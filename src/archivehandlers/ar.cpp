@@ -1,6 +1,7 @@
 
 /* This file is part of the KDE libraries
    Copyright (C) 2002 Laurence Anderson <l.d.anderson@warwick.ac.uk>
+   Copyright (C) 2013 Pier Luigi Fiorini <pierluigi.fiorini@gmail.com>
 
    This library is free software; you can redistribute it and/or
    modify it under the terms of the GNU Library General Public
@@ -17,7 +18,7 @@
    Boston, MA 02110-1301, USA.
 */
 
-#include "kar.h"
+#include "ar.h"
 
 #include <QtCore/QFile>
 #include <QtCore/QDebug>
@@ -26,57 +27,73 @@
 #include "kfilterdev.h"
 //#include "klimitediodevice_p.h"
 
+#include <karchive.h>
+#include <karchivehandlerplugin.h>
+
+class ArPlugin : public KArchiveHandlerPlugin
+{
+    Q_OBJECT
+    Q_PLUGIN_METADATA(IID "org.kde.KArchiveHandlerFactoryInterface" FILE "ar.json")
+public:
+    QStringList mimeTypes() const {
+        QStringList types;
+        types << QStringLiteral("application/x-archive");
+        return types;
+    }
+
+    KArchiveHandler *create(const QString &mimeType) {
+        if (mimeTypes().contains(mimeType))
+          return new ArHandler(mimeType);
+        return 0;
+    }
+};
+
 ////////////////////////////////////////////////////////////////////////
 /////////////////////////// KAr ///////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////
 
-class KAr::KArPrivate
+class ArHandler::ArHandlerPrivate
 {
 public:
-    KArPrivate() {}
+    ArHandlerPrivate() {}
 };
 
-KAr::KAr( const QString& filename )
-    : KArchive( filename ), d(new KArPrivate)
+ArHandler::ArHandler( const QString &mimeType )
+    : KArchiveHandler( mimeType ), d(new ArHandlerPrivate)
 {
 }
 
-KAr::KAr( QIODevice * dev )
-    : KArchive( dev ), d(new KArPrivate)
-{
-}
-
-KAr::~KAr()
+ArHandler::~ArHandler()
 {
     if( isOpen() )
         close();
     delete d;
 }
 
-bool KAr::doPrepareWriting( const QString&, const QString&, const QString&,
+bool ArHandler::doPrepareWriting( const QString&, const QString&, const QString&,
                             qint64, mode_t, time_t, time_t, time_t )
 {
     return false;
 }
 
-bool KAr::doFinishWriting( qint64 )
+bool ArHandler::doFinishWriting( qint64 )
 {
     return false;
 }
 
-bool KAr::doWriteDir( const QString&, const QString&, const QString&,
+bool ArHandler::doWriteDir( const QString&, const QString&, const QString&,
                       mode_t, time_t, time_t, time_t )
 {
     return false;
 }
 
-bool KAr::doWriteSymLink( const QString&, const QString&, const QString&,
+bool ArHandler::doWriteSymLink( const QString&, const QString&, const QString&,
                           const QString&, mode_t, time_t, time_t, time_t )
 {
     return false;
 }
 
-bool KAr::openArchive( QIODevice::OpenMode mode )
+bool ArHandler::openArchive( QIODevice::OpenMode mode )
 {
     // Open archive
 
@@ -155,7 +172,7 @@ bool KAr::openArchive( QIODevice::OpenMode mode )
         name.replace( '/', QByteArray() );
         //qDebug() << "Filename: " << name << " Size: " << size;
 
-        KArchiveEntry* entry = new KArchiveFile(this, QString::fromLocal8Bit(name.constData()), mode, date,
+        KArchiveEntry* entry = new KArchiveFile(archive(), QString::fromLocal8Bit(name.constData()), mode, date,
                                                 rootDir()->user(), rootDir()->group(), /*symlink*/ QString(),
                                                 dev->pos(), size);
         rootDir()->addEntry(entry); // Ar files don't support directories, so everything in root
@@ -167,11 +184,13 @@ bool KAr::openArchive( QIODevice::OpenMode mode )
     return true;
 }
 
-bool KAr::closeArchive()
+bool ArHandler::closeArchive()
 {
     // Close the archive
     return true;
 }
 
-void KAr::virtual_hook( int id, void* data )
-{ KArchive::virtual_hook( id, data ); }
+void ArHandler::virtual_hook( int id, void* data )
+{ KArchiveHandler::virtual_hook( id, data ); }
+
+#include "ar.moc"

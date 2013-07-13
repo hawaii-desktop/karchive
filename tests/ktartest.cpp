@@ -16,7 +16,7 @@
  *  Boston, MA 02110-1301, USA.
  */
 
-#include "ktar.h"
+#include "karchive.h"
 #include <stdio.h>
 #include <QtCore/QDebug>
 
@@ -51,7 +51,7 @@ int main( int argc, char** argv )
         return 1;
     }
     
-    KTar tar( argv[1] );
+    KArchive tar( argv[1] );
 
     if ( !tar.open( QIODevice::ReadOnly ) )
     {

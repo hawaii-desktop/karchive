@@ -1,5 +1,6 @@
 /* This file is part of the KDE libraries
    Copyright (C) 2002 Laurence Anderson <l.d.anderson@warwick.ac.uk>
+   Copyright (C) 2013 Pier Luigi Fiorini <pierluigi.fiorini@gmail.com>
 
    This library is free software; you can redistribute it and/or
    modify it under the terms of the GNU Library General Public
@@ -15,10 +16,10 @@
    the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
    Boston, MA 02110-1301, USA.
 */
-#ifndef KAR_H
-#define KAR_H
+#ifndef AR_H
+#define AR_H
 
-#include <karchive.h>
+#include <karchivehandler.h>
 
 /**
  * KAr is a class for reading archives in ar format. Writing
@@ -26,7 +27,7 @@
  * @short A class for reading ar archives.
  * @author Laurence Anderson <l.d.anderson@warwick.ac.uk>
  */
-class KARCHIVE_EXPORT KAr : public KArchive
+class KARCHIVE_EXPORT ArHandler : public KArchiveHandler
 {
 public:
     /**
@@ -34,20 +35,13 @@ public:
      *
      * @param filename is a local path (e.g. "/home/holger/myfile.ar")
      */
-    KAr( const QString& filename );
-
-    /**
-     * Creates an instance that operates on the given device.
-     * The device can be compressed (KFilterDev) or not (QFile, etc.).
-     * @param dev the device to read from
-     */
-    KAr( QIODevice * dev );
+    ArHandler( const QString &mimeType );
 
     /**
      * If the ar file is still opened, then it will be
      * closed automatically by the destructor.
      */
-    virtual ~KAr();
+    virtual ~ArHandler();
 
 protected:
 
@@ -86,8 +80,8 @@ protected:
 protected:
     virtual void virtual_hook( int id, void* data );
 private:
-    class KArPrivate;
-    KArPrivate* const d;
+    class ArHandlerPrivate;
+    ArHandlerPrivate* const d;
 };
 
 #endif

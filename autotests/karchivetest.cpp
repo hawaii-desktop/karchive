@@ -19,13 +19,13 @@
 */
 
 #include "karchivetest.h"
-#include <ktar.h>
 #include <kzip.h>
 #include <k7zip.h>
 
 #include <QtTest/QtTest>
 #include <QtCore/QFileInfo>
 #include <kfilterdev.h>
+#include <karchive.h>
 #include <qtemporarydir.h>
 
 #ifndef Q_OS_WIN
@@ -309,7 +309,7 @@ void KArchiveTest::testCreateTar()
     //       to avoid being slowed down by the kDebugs.
     QBENCHMARK {
 
-    KTar tar(fileName);
+    KArchive tar(fileName);
     QVERIFY(tar.open(QIODevice::WriteOnly));
 
     writeTestFilesToArchive(&tar);
@@ -338,7 +338,7 @@ void KArchiveTest::testCreateTarXXX()
     // Without tempfile:    0.87 ms,  987915 instr. loads
     QBENCHMARK {
 
-    KTar tar(fileName);
+    KArchive tar(fileName);
     QVERIFY(tar.open(QIODevice::WriteOnly));
 
     writeTestFilesToArchive(&tar);
@@ -367,7 +367,7 @@ void KArchiveTest::testReadTar() // testCreateTarGz must have been run first.
     // used when writing.
     QBENCHMARK {
 
-    KTar tar( fileName );
+    KArchive tar( fileName );
 
     QVERIFY( tar.open( QIODevice::ReadOnly ) );
 
@@ -450,7 +450,7 @@ void KArchiveTest::testTarFileData()
     QFETCH(QString, fileName);
 
     // testCreateTar must have been run first.
-    KTar tar(fileName);
+    KArchive tar(fileName);
     QVERIFY(tar.open(QIODevice::ReadOnly));
 
     testFileData(&tar);
@@ -466,7 +466,7 @@ void KArchiveTest::testTarCopyTo()
     QFETCH(QString, fileName);
 
     // testCreateTar must have been run first.
-    KTar tar(fileName);
+    KArchive tar(fileName);
     QVERIFY(tar.open(QIODevice::ReadOnly));
 
     testCopyTo(&tar);
@@ -482,7 +482,7 @@ void KArchiveTest::testTarReadWrite()
     QFETCH(QString, fileName);
 
     // testCreateTar must have been run first.
-    KTar tar(fileName);
+    KArchive tar(fileName);
     QVERIFY(tar.open(QIODevice::ReadWrite));
 
     testReadWrite(&tar);
@@ -492,7 +492,7 @@ void KArchiveTest::testTarReadWrite()
 
     // Reopen it and check it
     {
-        KTar tar(fileName);
+        KArchive tar(fileName);
         QVERIFY(tar.open(QIODevice::ReadOnly));
         testFileData( &tar );
         const KArchiveDirectory* dir = tar.directory();
@@ -519,7 +519,7 @@ void KArchiveTest::testTarMaxLength()
 {
     QFETCH( QString, fileName );
 
-    KTar tar( fileName );
+    KArchive tar( fileName );
 
     QVERIFY( tar.open( QIODevice::WriteOnly ) );
 
@@ -558,7 +558,7 @@ void KArchiveTest::testTarMaxLength()
 
 void KArchiveTest::testTarGlobalHeader()
 {
-    KTar tar(QFINDTESTDATA(QLatin1String("global_header_test.tar.bz2")));
+    KArchive tar(QFINDTESTDATA(QLatin1String("global_header_test.tar.bz2")));
     QVERIFY2(tar.open( QIODevice::ReadOnly ), "global_header_test.tar.bz2");
 
     const KArchiveDirectory* dir = tar.directory();
@@ -577,7 +577,7 @@ void KArchiveTest::testTarGlobalHeader()
 
 void KArchiveTest::testTarPrefix()
 {
-    KTar tar(QFINDTESTDATA(QLatin1String("tar_prefix_test.tar.bz2")));
+    KArchive tar(QFINDTESTDATA(QLatin1String("tar_prefix_test.tar.bz2")));
     QVERIFY2(tar.open(QIODevice::ReadOnly), "tar_prefix_test.tar.bz2");
 
     const KArchiveDirectory* dir = tar.directory();
@@ -603,7 +603,7 @@ void KArchiveTest::testTarPrefix()
 
 void KArchiveTest::testTarDirectoryForgotten()
 {
-    KTar tar(QFINDTESTDATA(QLatin1String("tar_directory_forgotten.tar.bz2")));
+    KArchive tar(QFINDTESTDATA(QLatin1String("tar_directory_forgotten.tar.bz2")));
     QVERIFY2(tar.open(QIODevice::ReadOnly), "tar_directory_forgotten.tar.bz2");
 
     const KArchiveDirectory* dir = tar.directory();
@@ -621,7 +621,7 @@ void KArchiveTest::testTarDirectoryForgotten()
 
 void KArchiveTest::testTarRootDir() // bug 309463
 {
-    KTar tar(QFINDTESTDATA(QLatin1String("tar_rootdir.tar.bz2")));
+    KArchive tar(QFINDTESTDATA(QLatin1String("tar_rootdir.tar.bz2")));
     QVERIFY2(tar.open(QIODevice::ReadOnly), qPrintable(tar.fileName()));
 
     const KArchiveDirectory* dir = tar.directory();
@@ -639,7 +639,7 @@ void KArchiveTest::testTarRootDir() // bug 309463
 
 void KArchiveTest::testTarDirectoryTwice() // bug 206994
 {
-    KTar tar(QFINDTESTDATA(QLatin1String("tar_directory_twice.tar.bz2")));
+    KArchive tar(QFINDTESTDATA(QLatin1String("tar_directory_twice.tar.bz2")));
     QVERIFY(tar.open(QIODevice::ReadOnly));
 
     const KArchiveDirectory* dir = tar.directory();
